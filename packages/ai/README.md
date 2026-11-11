@@ -338,6 +338,7 @@ import {
   CloudflareAIGateway,
   CloudflareWorkersAI,
   DigitalOcean,
+  Nace,
   OpenCode,
   OpenRouter,
   TypeSafeAI,
@@ -345,6 +346,7 @@ import {
 } from "@opencode/ai/providers"
 
 TypeSafeAI.configure().decision("jev-latest")
+Nace.configure().decision("drex-max-v1.1")
 OpenCode.configure().decision("jev-1.13")
 OpenRouter.configure().decision("typesafe/jev-1.13")
 VercelAIGateway.configure().decision("typesafe-ai/jev")
@@ -354,7 +356,7 @@ CloudflareWorkersAI.configure({ accountId }).decision("@cf/cloudflare/clef")
 CloudflareAIGateway.configure({ accountId }).decision("typesafe/jev")
 ```
 
-OpenAI and Vercel AI Gateway use OpenAI's `/v1/decisions` API. TypeSafe, OpenCode, OpenRouter, Baseten and
+OpenAI and Vercel AI Gateway use OpenAI's `/v1/decisions` API. TypeSafe, Nace, OpenCode, OpenRouter, Baseten and
 DigitalOcean use System One (`/systemone`), and Cloudflare sends the System One body through `/ai/run`.
 
 ## Embeddings

@@ -52,6 +52,7 @@ export const Response = Schema.Struct({
   answers: Schema.Record(Schema.String, Answer),
   usage: Schema.optional(NativeUsage),
   id: Schema.optional(Schema.String),
+  request_id: Schema.optional(Schema.String),
   provider: Schema.optional(Schema.String),
   provider_metadata: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown))),
 })
@@ -211,6 +212,7 @@ export const toResponse = (
   const names = request.questions.map((question) => question.name)
   if (Object.keys(data.answers).length !== names.length || !names.every((name) => Object.hasOwn(data.answers, name)))
     return Effect.fail(invalid("System One answers do not match the requested questions"))
+  const responseId = data.id ?? data.request_id
   return Effect.succeed(
     new DecisionResponse({
       answers: request.questions.map((question) => toAnswer(question, data.answers[question.name])),
@@ -227,7 +229,7 @@ export const toResponse = (
         [providerMetadataKey]: {
           model: data.model,
           ...(data.usage === undefined ? {} : { usage: data.usage }),
-          ...(data.id === undefined ? {} : { responseId: data.id }),
+          ...(responseId === undefined ? {} : { responseId }),
           ...(data.provider === undefined ? {} : { provider: data.provider }),
           ...data.provider_metadata?.[providerMetadataKey],
         },

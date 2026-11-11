@@ -1,10 +1,11 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpClientRequest } from "effect/http"
 import { ai, DecisionClient, DecisionUsage, Media } from "../src/effect.js"
 import {
   Baseten,
   CloudflareWorkersAI,
+  Nace,
   OpenAI,
   OpenCode,
   OpenRouter,
@@ -16,6 +17,7 @@ import { dynamicResponse, json, type Handler } from "./lib/http.js"
 
 const client = (handler: Handler) => DecisionClient.layer.pipe(Layer.provide(dynamicResponse(handler)))
 const offline = client(() => Effect.die("an invalid decision request reached the network"))
+const withEnv = (env: Record<string, string>) => Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
 
 const png = Media.bytes(new Uint8Array([1, 2, 3]), "image/png")
 
@@ -728,6 +730,161 @@ describe("Decision", () => {
           ),
         ),
       ),
+  )
+
+  it.effect("decides through Nace with root images, the attribution header and the request id", () =>
+    Effect.gen(function* () {
+      const response = yield* ai.decision.generate({
+        model: Nace.configure({ apiKey: "nace-key", baseURL: "https://nace.test/v1/" }).decision("drex-max-v1.1"),
+        input: [
+          { type: "text", text: "Ticket:" },
+          { type: "json", value: { ticket: "Please refund the duplicate charge." } },
+          { type: "media", media: png },
+          { type: "media", media: Media.bytes(new Uint8Array([4, 5, 6]), "image/webp") },
+        ],
+        questions,
+      })
+
+      expect(response.answers).toEqual([
+        expectedAnswers[0],
+        expectedAnswers[1],
+        { name: "refund", type: "predicate", probability: 0.97 },
+      ])
+      expect(response.usage?.inputTokens).toBe(231)
+      expect(response.usage?.totalTokens).toBe(237)
+      expect(response.providerMetadata).toEqual({
+        nace: {
+          model: "drex-max-v1.1",
+          usage: { input_tokens: 231, output_tokens: 6, image_tokens: 200 },
+          responseId: "req_0123456789abcdef0123456789abcdef",
+        },
+      })
+    }).pipe(
+      Effect.provide(
+        client((input) =>
+          Effect.gen(function* () {
+            const request = yield* HttpClientRequest.toWeb(input.request).pipe(Effect.orDie)
+            expect(request.url).toBe("https://nace.test/v1/systemone")
+            expect(request.headers.get("authorization")).toBe("Bearer nace-key")
+            expect(request.headers.get("x-nace-client")).toBe("opencode-nace/1")
+            expect(JSON.parse(input.text)).toEqual({
+              model: "drex-max-v1.1",
+              state: ["Ticket:", { ticket: "Please refund the duplicate charge." }],
+              images: ["data:image/png;base64,AQID", "data:image/webp;base64,BAUG"],
+              questions: {
+                department: {
+                  type: "choice",
+                  instructions: "Which team should handle this?",
+                  criteria: { billing: "Payments and refunds", technical: null },
+                },
+                urgency: {
+                  type: "score",
+                  instructions: "How urgent is this?",
+                  criteria: ["Can wait", "Needs attention: Same day", "Blocking"],
+                },
+                refund: { type: "noul", instructions: "Is the customer asking for a refund?" },
+              },
+            })
+            return json(input, {
+              model: "drex-max-v1.1",
+              answers: { ...systemOneAnswers, refund: { type: "noul", noul: 0.97, confidence: 0.97 } },
+              usage: { input_tokens: 231, output_tokens: 6, image_tokens: 200 },
+              evaluation_time_ms: 142.6,
+              request_id: "req_0123456789abcdef0123456789abcdef",
+            })
+          }),
+        ),
+      ),
+    ),
+  )
+
+  it.effect("lets a caller header replace the Nace attribution header", () =>
+    ai.decision
+      .generate({
+        model: Nace.configure({ apiKey: "nace-key", headers: { "X-Nace-Client": "acme-app/2" } }).decision("drex-v2.0"),
+        input: "hello",
+        questions: [defect],
+      })
+      .pipe(
+        Effect.provide(
+          client((input) => {
+            expect(input.request.url).toBe("https://console.nace.ai/v1/systemone")
+            expect(input.request.headers["x-nace-client"]).toBe("acme-app/2")
+            expect(JSON.parse(input.text).images).toBeUndefined()
+            return Effect.succeed(json(input, { model: "drex-v2.0", answers: { defect: { type: "noul", noul: 0.5 } } }))
+          }),
+        ),
+      ),
+  )
+
+  it.effect("rejects audio for Nace before network I/O", () =>
+    Effect.gen(function* () {
+      const error = yield* ai.decision
+        .generate({
+          model: Nace.configure({ apiKey: "nace-key" }).decision("drex-max-v1.1"),
+          input: [{ type: "media", media: Media.base64("AAAA", "audio/wav") }],
+          questions: [defect],
+        })
+        .pipe(Effect.flip)
+      expect(error.reason._tag).toBe("UnsupportedOperation")
+      expect(error.message).toContain("audio/wav")
+    }).pipe(Effect.provide(offline)),
+  )
+
+  it.effect("fails when the Nace key is missing instead of sending the request", () =>
+    Effect.gen(function* () {
+      const error = yield* ai.decision
+        .generate({ model: Nace.decision("drex-latest"), input: "hello", questions: [defect] })
+        .pipe(Effect.flip)
+      expect(error.reason._tag).toBe("Authentication")
+      expect(error.message).toContain("NACE_API_KEY")
+    }).pipe(withEnv({}), Effect.provide(offline)),
+  )
+
+  it.effect("reads the Nace key from NACE_API_KEY", () =>
+    ai.decision.generate({ model: Nace.decision("drex-latest"), input: "hello", questions: [defect] }).pipe(
+      Effect.provide(
+        client((input) => {
+          expect(input.request.headers.authorization).toBe("Bearer env-key")
+          return Effect.succeed(
+            json(input, { model: "drex-max-v1.1", answers: { defect: { type: "noul", noul: 0.5 } } }),
+          )
+        }),
+      ),
+      withEnv({ NACE_API_KEY: "env-key" }),
+    ),
+  )
+
+  it.effect("surfaces Nace authentication, validation and capacity failures with their messages", () =>
+    Effect.gen(function* () {
+      const failure = (status: number, type: string, message: string) =>
+        ai.decision
+          .generate({
+            model: Nace.configure({ apiKey: "nace-key" }).decision("drex-max-v1.1"),
+            input: "x",
+            questions: [defect],
+          })
+          .pipe(
+            Effect.flip,
+            Effect.provide(
+              client((input) =>
+                Effect.succeed(json(input, { error: { type, message }, request_id: "req_failure" }, { status })),
+              ),
+            ),
+          )
+      const unauthorized = yield* failure(401, "authentication_error", "Invalid API key")
+      expect(unauthorized.reason._tag).toBe("Authentication")
+      expect(unauthorized.message).toContain("Invalid API key")
+      const invalid = yield* failure(422, "invalid_request_error", "images require drex-max-v1.1 or drex-max-finance")
+      expect(invalid.reason._tag).toBe("InvalidRequest")
+      expect(invalid.message).toContain("images require")
+      const credit = yield* failure(402, "insufficient_credit", "Add credit to continue")
+      expect(credit.message).toContain("Add credit")
+      const limited = yield* failure(429, "rate_limit_error", "Too many requests")
+      expect(limited.reason._tag).toBe("RateLimit")
+      const overloaded = yield* failure(529, "overloaded", "Capacity is exhausted")
+      expect(overloaded.message).toContain("Capacity")
+    }),
   )
 
   it.effect("rejects duplicate question names before network I/O", () =>

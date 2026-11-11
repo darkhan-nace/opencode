@@ -6,6 +6,7 @@ import {
   CloudflareAIGateway,
   CloudflareWorkersAI,
   DigitalOcean,
+  Nace,
   OpenAI,
   OpenCode,
   OpenRouter,
@@ -53,6 +54,14 @@ const opencode = recordedTests({
   protocol: "system-one",
   requires: ["OPENCODE_API_KEY"],
   metadata: { model: "jev-1.13-free" },
+})
+
+const nace = recordedTests({
+  prefix: "nace-decision",
+  provider: "nace",
+  protocol: "system-one",
+  requires: ["NACE_API_KEY"],
+  metadata: { model: "drex-v2.0" },
 })
 
 const openrouter = recordedTests({
@@ -116,6 +125,10 @@ describe("Decision recorded", () => {
 
   opencode.effect("decides choice score and predicate questions", () =>
     assertDecision(OpenCode.configure({ apiKey: process.env.OPENCODE_API_KEY ?? "fixture" }).decision("jev-1.13-free")),
+  )
+
+  nace.effect("decides choice score and predicate questions", () =>
+    assertDecision(Nace.configure({ apiKey: process.env.NACE_API_KEY ?? "fixture" }).decision("drex-v2.0")),
   )
 
   openrouter.effect("decides choice score and predicate questions", () =>

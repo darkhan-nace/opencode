@@ -32,6 +32,7 @@ import {
   Google,
   Meta,
   MiniMax,
+  Nace,
   OpenCode,
   OpenAI,
   OpenAICompatible,
@@ -155,6 +156,7 @@ describe("public exports", () => {
     expect(OpenRouter.decision).toBeFunction()
     expect(TypeSafeAI.decision).toBeFunction()
     expect(OpenCode.decision).toBeFunction()
+    expect(Nace.decision("drex-latest").route.id).toBe("system-one")
     expect(VercelAIGateway.decision("typesafe-ai/jev").route.id).toBe("openai-decisions")
     expect(Baseten.decision).toBeFunction()
     expect(DigitalOcean.decision).toBeFunction()

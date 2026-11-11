@@ -255,6 +255,17 @@ const decisions: ReadonlyArray<Case<DecisionModel>> = [
     provider: "opencode",
   },
   {
+    name: "nace",
+    load: async () => {
+      const { model } = await import("@opencode/ai/providers/nace/decisions")
+      return model("drex-max-v1.1", { ...shared, apiKey: "nace-key", baseURL: "https://nace.test/v1" })
+    },
+    url: "https://nace.test/v1/systemone",
+    auth: ["authorization", "Bearer nace-key"],
+    headers: { "x-nace-client": "opencode-nace/1" },
+    provider: "nace",
+  },
+  {
     name: "openrouter",
     load: async () => {
       const { model } = await import("@opencode/ai/providers/openrouter/decisions")
